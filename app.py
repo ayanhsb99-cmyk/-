@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai
 
 # ==========================================
 # 1. إعدادات الواجهة والصفحة
@@ -17,11 +17,11 @@ st.subheader("قم برفع ملفات المحادثات للجروبات ال�
 with st.sidebar:
     st.header("⚙️ إعدادات النظام")
     api_key = st.text_input(
-        "أدخل مفتاح Gemini API:", 
-        value="AQ.Ab8RN6KKame2akA2q6MNx-PVXe1njMzD5hlcB_PkDq90RUyNVA", 
-        type="password"
+        "أدخل مفتاح Gemini API الخاص بك:", 
+        type="password",
+        help="احصل على مفتاح مجاني من https://aistudio.google.com/app/apikey"
     )
-    st.info("💡 المفتاح يتم استخدامه لتشغيل عمليات التحليل فقط.")
+    st.info("💡 أدخل مفتاح API الصادر من Google AI Studio لتشغيل عمليات التحليل.")
 
 # ==========================================
 # 2. دالة تنظيف وقراءة المحادثات
@@ -46,14 +46,14 @@ def parse_whatsapp_chat(file_content):
     return messages
 
 # ==========================================
-# 3. دالة التحليل المدمج عبر Gemini
+# 3. دالة التحليل المدمج عبر SDK الرسمي
 # ==========================================
 def generate_combined_report(chat1_msgs, chat2_msgs, chat3_msgs, user_api_key):
-    genai.configure(api_key=user_api_key)
+    client = genai.Client(api_key=user_api_key)
     
-    combined_text = "### محتوى الجروب الأول:\n" + "\n".join([f"- {m}" for m in chat1_msgs[:150]]) + "\n\n"
-    combined_text += "### محتوى الجروب الثاني:\n" + "\n".join([f"- {m}" for m in chat2_msgs[:150]]) + "\n\n"
-    combined_text += "### محتوى الجروب الثالث:\n" + "\n".join([f"- {m}" for m in chat3_msgs[:150]])
+    combined_text = "### محتوى الجروب الأول:\n" + "\n".join([f"- {m}" for m in chat1_msgs[:200]]) + "\n\n"
+    combined_text += "### محتوى الجروب الثاني:\n" + "\n".join([f"- {m}" for m in chat2_msgs[:200]]) + "\n\n"
+    combined_text += "### محتوى الجروب الثالث:\n" + "\n".join([f"- {m}" for m in chat3_msgs[:200]])
 
     prompt = f"""
 أنت خبير في تحليل المنشورات ورصد الرأي العام والوسائط الاجتماعية.
@@ -78,8 +78,10 @@ def generate_combined_report(chat1_msgs, chat2_msgs, chat3_msgs, user_api_key):
 - **التوصيات**:
 """
 
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt
+    )
     return response.text
 
 # ==========================================
@@ -106,7 +108,7 @@ st.markdown("---")
 # ==========================================
 if st.button("🚀 توليد التقرير الأسبوعي المدمج", type="primary", use_container_width=True):
     if not api_key:
-        st.error("⚠️ يرجى إدخال مفتاح API في الشريط الجانبي أولاً.")
+        st.error("⚠️ يرجى إدخال مفتاح API الخاص بك في الشريط الجانبي أولاً.")
     elif not (file1 and file2 and file3):
         st.warning("⚠️ يرجى رفع ملفات المحادثات للجروبات الثلاثة قبل بدء التحليل.")
     else:
