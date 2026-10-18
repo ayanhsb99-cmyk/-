@@ -18,7 +18,7 @@ with st.sidebar:
     st.header("⚙️ إعدادات النظام")
     api_key = st.text_input(
         "أدخل مفتاح Gemini API:", 
-        value="AQ.Ab8RN6Lc3K0vcmrUlkgCnsPqtJ67EiHJOvqmhdGLvPzmBHqTAg", 
+        value="AQ.Ab8RN6KKame2akA2q6MNx-PVXe1njMzD5hlcB_PkDq90RUyNVA", 
         type="password"
     )
     st.info("💡 المفتاح يتم استخدامه لتشغيل عمليات التحليل فقط.")
