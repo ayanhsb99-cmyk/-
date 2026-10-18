@@ -1,8 +1,13 @@
 import streamlit as st
 from google import genai
+import docx
+from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
+import io
 
 # ==========================================
-# 1. إعدادات الواجهة والصفحة (كما هي دون تغيير)
+# 1. إعدادات الواجهة والصفحة
 # ==========================================
 st.set_page_config(
     page_title="نظام تحليل محادثات الواتساب الأسبوعي",
@@ -52,7 +57,55 @@ def get_balanced_sample(msgs, max_count=600):
     return msgs[::step][:max_count]
 
 # ==========================================
-# 3. دالة التحليل وبناء التقرير بالواجهة الجديدة المطلوبة
+# 3. دالة إنشاء مستند Word (DOCX) وتنسيقه
+# ==========================================
+def create_docx_report(report_text):
+    doc = docx.Document()
+    
+    # تحويل النص إلى أسطر لإنشاء الهيكلية
+    lines = report_text.splitlines()
+    
+    for line in lines:
+        line_str = line.strip()
+        if not line_str:
+            continue
+            
+        # العناوين الرئيسية
+        if line_str.startswith("# "):
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            run = p.add_run(line_str.replace("# ", ""))
+            run.font.size = Pt(18)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(0, 51, 102)
+        elif line_str.startswith("## "):
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            run = p.add_run(line_str.replace("## ", ""))
+            run.font.size = Pt(16)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(0, 102, 153)
+        elif line_str.startswith("### "):
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            run = p.add_run(line_str.replace("### ", ""))
+            run.font.size = Pt(14)
+            run.font.bold = True
+        else:
+            # الفقرات العادية
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            run = p.add_run(line_str.replace("**", ""))
+            run.font.size = Pt(12)
+            
+    # حفظ المستند في الذاكرة
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+# ==========================================
+# 4. دالة التحليل وبناء التقرير
 # ==========================================
 def generate_combined_report(chat1_msgs, chat2_msgs, chat3_msgs, user_api_key):
     client = genai.Client(api_key=user_api_key.strip())
@@ -131,7 +184,7 @@ def generate_combined_report(chat1_msgs, chat2_msgs, chat3_msgs, user_api_key):
     return response.text
 
 # ==========================================
-# 4. أيقونات واجهة رفع الملفات الثلاثة (دون تغيير)
+# 5. أيقونات واجهة رفع الملفات الثلاثة
 # ==========================================
 col1, col2, col3 = st.columns(3)
 
@@ -150,7 +203,7 @@ with col3:
 st.markdown("---")
 
 # ==========================================
-# 5. زر المعالجة واستخراج النتائج (دون تغيير)
+# 6. زر المعالجة واستخراج النتائج
 # ==========================================
 if st.button("🚀 توليد التقرير الأسبوعي المدمج", type="primary", use_container_width=True):
     if not api_key:
@@ -168,15 +221,18 @@ if st.button("🚀 توليد التقرير الأسبوعي المدمج", typ
                 
                 report = generate_combined_report(msgs1, msgs2, msgs3, api_key)
                 
+                # إنشاء ملف Word
+                docx_file = create_docx_report(report)
+                
                 st.markdown("---")
                 st.header("📊 التقرير الأسبوعي المدمج والتحليل الشامل")
                 st.markdown(report)
                 
                 st.download_button(
-                    label="📥 تنزيل التقرير بملف (Weekly_Report.txt)",
-                    data=report,
-                    file_name="Weekly_Report.txt",
-                    mime="text/plain",
+                    label="📄 تنزيل التقرير بملف ورد (Weekly_Report.docx)",
+                    data=docx_file,
+                    file_name="Weekly_Report.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True
                 )
         except Exception as e:
