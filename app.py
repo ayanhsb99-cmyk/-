@@ -91,4 +91,4 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("### 💬 الجروب الأول")
-    file1 = st.file_uploader("يرجى رفع ملف
+    file1 = st.file_uploader("يرجى رفع الملف")
