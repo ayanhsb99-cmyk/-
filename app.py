@@ -1,6 +1,5 @@
 import streamlit as st
-import re
-from google import genai
+import google.generativeai as genai
 
 # ==========================================
 # 1. إعدادات الواجهة والصفحة
@@ -17,7 +16,11 @@ st.subheader("قم برفع ملفات المحادثات للجروبات ال�
 # إدخال مفتاح API في الشريط الجانبي
 with st.sidebar:
     st.header("⚙️ إعدادات النظام")
-    api_key = st.text_input("أدخل مفتاح Gemini API:", value="AQ.Ab8RN6Lc3K0vcmrUlkgCnsPqtJ67EiHJOvqmhdGLvPzmBHqTAg", type="password")
+    api_key = st.text_input(
+        "أدخل مفتاح Gemini API:", 
+        value="AQ.Ab8RN6Lc3K0vcmrUlkgCnsPqtJ67EiHJOvqmhdGLvPzmBHqTAg", 
+        type="password"
+    )
     st.info("💡 المفتاح يتم استخدامه لتشغيل عمليات التحليل فقط.")
 
 # ==========================================
@@ -43,9 +46,11 @@ def parse_whatsapp_chat(file_content):
     return messages
 
 # ==========================================
-# 3. دالة التحليل المدمج عبر Gemini 3.8
+# 3. دالة التحليل المدمج عبر Gemini
 # ==========================================
-def generate_combined_report(chat1_msgs, chat2_msgs, chat3_msgs, client):
+def generate_combined_report(chat1_msgs, chat2_msgs, chat3_msgs, user_api_key):
+    genai.configure(api_key=user_api_key)
+    
     combined_text = "### محتوى الجروب الأول:\n" + "\n".join([f"- {m}" for m in chat1_msgs[:150]]) + "\n\n"
     combined_text += "### محتوى الجروب الثاني:\n" + "\n".join([f"- {m}" for m in chat2_msgs[:150]]) + "\n\n"
     combined_text += "### محتوى الجروب الثالث:\n" + "\n".join([f"- {m}" for m in chat3_msgs[:150]])
@@ -61,7 +66,7 @@ def generate_combined_report(chat1_msgs, chat2_msgs, chat3_msgs, client):
 المطلوب منك تحليل كافة المحادثات ودمج الأفكار لتوليد تقرير أسبوعي شامل باللغة العربية يغطي المواضيع من كافة الجروبات:
 
 1. **جدول التصنيف العام الشامل**:
-قم باستخراج كافة المواضيع والمنشورات المذكورة، وصنفه في جدول Markdown يحتوي على الحقول التالية:
+قم باستخراج كافة المواضيع والمنشورات المذكورة، وصنفها في جدول Markdown يحتوي على الحقول التالية:
 | الموضوع الرئيسي | نوع التصنيف (شائعة / رأي عام / رصد) | التقييم (إيجابي / سلبي / محايد) | المنصة (فيسبوك / انستغرام / تليكرام / واتساب / تيك توك / مواقع اخبارية / X / غير محدد) | مستوى التفاعل (ضعيف / متوسط / عالي) | المصدر (جروب 1 / 2 / 3 أو مشترك) |
 
 2. **التقرير الأسبوعي الشامل لأهم المواضيع**:
@@ -73,10 +78,8 @@ def generate_combined_report(chat1_msgs, chat2_msgs, chat3_msgs, client):
 - **التوصيات**:
 """
 
-    response = client.models.generate_content(
-        model='gemini-3.8-flash',
-        contents=prompt,
-    )
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    response = model.generate_content(prompt)
     return response.text
 
 # ==========================================
@@ -108,8 +111,6 @@ if st.button("🚀 توليد التقرير الأسبوعي المدمج", typ
         st.warning("⚠️ يرجى رفع ملفات المحادثات للجروبات الثلاثة قبل بدء التحليل.")
     else:
         try:
-            client = genai.Client(api_key=api_key)
-            
             with st.spinner("⏳ جاري قراءة الملفات وتحليل كافة محادثات الجروبات..."):
                 msgs1 = parse_whatsapp_chat(file1.getvalue())
                 msgs2 = parse_whatsapp_chat(file2.getvalue())
@@ -117,7 +118,7 @@ if st.button("🚀 توليد التقرير الأسبوعي المدمج", typ
                 
                 st.success(f"✅ تم القراءة بنجاح! (الجروب الأول: {len(msgs1)} رسالة | الجروب الثاني: {len(msgs2)} رسالة | الجروب الثالث: {len(msgs3)} رسالة)")
                 
-                report = generate_combined_report(msgs1, msgs2, msgs3, client)
+                report = generate_combined_report(msgs1, msgs2, msgs3, api_key)
                 
                 st.markdown("---")
                 st.header("📊 التقرير الأسبوعي المدمج والتحليل الشامل")
