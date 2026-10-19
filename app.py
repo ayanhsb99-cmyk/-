@@ -36,7 +36,7 @@ with st.sidebar:
     st.info("💡 يمكنك كتابة جزء من الاسم لمعرفة عدد مرفوعاته داخل المحادثة.")
 
 # ==========================================
-# 2. دالة تنظيف وقراءة المحادثات (مُعدلة لدعم الواتساب العربي بدقة)
+# 2. دالة تنظيف وقراءة المحادثات (مُصححة وبسيطة)
 # ==========================================
 def parse_whatsapp_chat(file_content):
     lines = file_content.decode('utf-8', errors='ignore').splitlines()
@@ -48,25 +48,25 @@ def parse_whatsapp_chat(file_content):
         if not line_str or "<Media omitted>" in line_str or "رسائل ومكالمات مشفرة" in line_str or "end-to-end encrypted" in line_str:
             continue
         
-        # النمط العام للواتساب: [تاريخ/وقت] الاسم: الرسالة أو تاريخ - الاسم: الرسالة
         if ":" in line_str:
-            # البحث عن صيغة الاسم قبل النقطتين :
             parts = line_str.split(":", 1)
             left_part = parts[0]
             msg_text = parts[1].strip() if len(parts) > 1 else ""
             
-            # استخراج اسم المرسل بإزالة طوابع الوقت والأحرف الخاصة
-            sender_name = re.sub(r'^[\u200e\u200f\s\d\/\,\.\-\:\p{P}\[\]\(\)\u0600-\u0605\u0660-\u0669\u06f0-\u06f9amPMامص]+', '', left_part).strip()
-            # في حال لم يتبق شيء، نأخذ الجزء الأخير بعد الشارطة -
-            if "-" in left_part and (not sender_name or len(sender_name) < 2):
-                sender_name = left_part.split("-")[-1].strip()
+            # استخراج اسم المرسل بإزالة التاريخ والتوقيت والرموز الخاصة الشائعة
+            sender_name = left_part
+            if "-" in left_part:
+                sender_name = left_part.split("-")[-1]
+            elif "]" in left_part:
+                sender_name = left_part.split("]")[-1]
+            elif ")" in left_part:
+                sender_name = left_part.split(")")[-1]
                 
-            if not sender_name:
-                sender_name = left_part.strip()
+            sender_name = sender_name.strip()
 
             if msg_text:
                 messages.append(f"{sender_name}: {msg_text}")
-                if len(sender_name) > 1 and not sender_name.isdigit():
+                if sender_name and not sender_name.isdigit():
                     user_stats[sender_name] = user_stats.get(sender_name, 0) + 1
         else:
             if messages:
@@ -124,7 +124,7 @@ def create_docx_report(report_text):
     return buffer
 
 # ==========================================
-# 4. دالة التحليل وبناء التقرير
+# 4. دالة التحليل وبناء التقرير عبر Gemini
 # ==========================================
 def generate_single_chat_report(chat_msgs, user_api_key):
     client = genai.Client(api_key=user_api_key.strip())
