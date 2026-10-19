@@ -5,6 +5,7 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
 import re
+import time
 
 # ==========================================
 # 1. إعدادات الواجهة والصفحة
@@ -48,14 +49,11 @@ def parse_whatsapp_chat(file_content):
         if not line_str or "<Media omitted>" in line_str or "Messages and calls are end-to-end encrypted" in line_str:
             continue
         
-        # محاولة التعرف على المرسل والنص
         if ":" in line_str:
             parts = line_str.split(":", 1)
-            # التأكد من أن الجزء الأول يحتوي على اسم مرسل (تخطي طوابع الوقت إن وجدت)
             sender_part = parts[0]
             msg_text = parts[1].strip() if len(parts) > 1 else ""
             
-            # استخراج الاسم بفرز الأرقام والتاريخ
             sender_name = re.sub(r'^[\[\(\d\/\,\.\s\:\-\w\]\)]+-\s*', '', sender_part).strip()
             if not sender_name:
                 sender_name = sender_part.strip()
@@ -119,7 +117,7 @@ def create_docx_report(report_text):
     return buffer
 
 # ==========================================
-# 4. دالة التحليل وبناء التقرير عبر Gemini
+# 4. دالة التحليل مع إعادة المحاولة واستخدام نماذج بديلة
 # ==========================================
 def generate_single_chat_report(chat_msgs, user_api_key):
     client = genai.Client(api_key=user_api_key.strip())
@@ -186,11 +184,23 @@ def generate_single_chat_report(chat_msgs, user_api_key):
 | الرقم | الموضوع | نوع التصنيف (شائعة / رأي عام / رصد) | التقييم (إيجابي / سلبي / محايد) | المنصة / المصدر | مستوى التفاعل | المعالجة المقترحة |
 """
 
-    response = client.models.generate_content(
-        model='gemini-3.8-flash',
-        contents=prompt
-    )
-    return response.text
+    # قائمة النماذج لتجربتها بالترتيب في حال وجود ضغط على أحدها
+    models_to_try = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']
+    
+    last_exception = None
+    for model_name in models_to_try:
+        for attempt in range(2): # محاولتان لكل نموذج
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+                return response.text
+            except Exception as e:
+                last_exception = e
+                time.sleep(2) # الانتظار ثانيتين قبل إعادة المحاولة
+                
+    raise last_exception
 
 # ==========================================
 # 5. واجهة رفع ملف الجروب الواحد
@@ -209,7 +219,6 @@ if single_file:
     
     st.success(f"✅ تم قراءة الملف بنجاح! إجمالي الرسائل: {total_messages} رسالة.")
     
-    # عرض إحصائية اسم الشخص المبحوث عنه
     if search_user:
         matched_users = [u for u in user_stats.keys() if search_user.strip().lower() in u.lower()]
         if matched_users:
