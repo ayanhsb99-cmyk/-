@@ -1,11 +1,10 @@
 import streamlit as st
 from google import genai
 import docx
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
 import re
-import time
 
 # ==========================================
 # 1. إعدادات الواجهة والصفحة
@@ -32,12 +31,12 @@ with st.sidebar:
     st.header("🔍 البحث عن إحصائيات عضو")
     search_user = st.text_input(
         "أدخل اسم الشخص للبحث عن مشاركاته:",
-        placeholder="مثال: أحمد علي"
+        placeholder="اكتب أي جزء من الاسم..."
     )
-    st.info("💡 اكتب اسم الشخص كما يظهر في محادثة الواتساب لمعرفة عدد مرفوعاته.")
+    st.info("💡 يمكنك كتابة جزء من الاسم لمعرفة عدد مرفوعاته داخل المحادثة.")
 
 # ==========================================
-# 2. دالة تنظيف وقراءة المحادثات واستخراج أسماء المترسلين
+# 2. دالة تنظيف وقراءة المحادثات (مُعدلة لدعم الواتساب العربي بدقة)
 # ==========================================
 def parse_whatsapp_chat(file_content):
     lines = file_content.decode('utf-8', errors='ignore').splitlines()
@@ -46,21 +45,29 @@ def parse_whatsapp_chat(file_content):
     
     for line in lines:
         line_str = line.strip()
-        if not line_str or "<Media omitted>" in line_str or "Messages and calls are end-to-end encrypted" in line_str:
+        if not line_str or "<Media omitted>" in line_str or "رسائل ومكالمات مشفرة" in line_str or "end-to-end encrypted" in line_str:
             continue
         
+        # النمط العام للواتساب: [تاريخ/وقت] الاسم: الرسالة أو تاريخ - الاسم: الرسالة
         if ":" in line_str:
+            # البحث عن صيغة الاسم قبل النقطتين :
             parts = line_str.split(":", 1)
-            sender_part = parts[0]
+            left_part = parts[0]
             msg_text = parts[1].strip() if len(parts) > 1 else ""
             
-            sender_name = re.sub(r'^[\[\(\d\/\,\.\s\:\-\w\]\)]+-\s*', '', sender_part).strip()
+            # استخراج اسم المرسل بإزالة طوابع الوقت والأحرف الخاصة
+            sender_name = re.sub(r'^[\u200e\u200f\s\d\/\,\.\-\:\p{P}\[\]\(\)\u0600-\u0605\u0660-\u0669\u06f0-\u06f9amPMامص]+', '', left_part).strip()
+            # في حال لم يتبق شيء، نأخذ الجزء الأخير بعد الشارطة -
+            if "-" in left_part and (not sender_name or len(sender_name) < 2):
+                sender_name = left_part.split("-")[-1].strip()
+                
             if not sender_name:
-                sender_name = sender_part.strip()
+                sender_name = left_part.strip()
 
-            if len(msg_text) > 0:
+            if msg_text:
                 messages.append(f"{sender_name}: {msg_text}")
-                user_stats[sender_name] = user_stats.get(sender_name, 0) + 1
+                if len(sender_name) > 1 and not sender_name.isdigit():
+                    user_stats[sender_name] = user_stats.get(sender_name, 0) + 1
         else:
             if messages:
                 messages[-1] += " " + line_str
@@ -117,7 +124,7 @@ def create_docx_report(report_text):
     return buffer
 
 # ==========================================
-# 4. دالة التحليل مع إعادة المحاولة واستخدام نماذج بديلة
+# 4. دالة التحليل وبناء التقرير
 # ==========================================
 def generate_single_chat_report(chat_msgs, user_api_key):
     client = genai.Client(api_key=user_api_key.strip())
@@ -184,23 +191,11 @@ def generate_single_chat_report(chat_msgs, user_api_key):
 | الرقم | الموضوع | نوع التصنيف (شائعة / رأي عام / رصد) | التقييم (إيجابي / سلبي / محايد) | المنصة / المصدر | مستوى التفاعل | المعالجة المقترحة |
 """
 
-    # قائمة النماذج لتجربتها بالترتيب في حال وجود ضغط على أحدها
-    models_to_try = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']
-    
-    last_exception = None
-    for model_name in models_to_try:
-        for attempt in range(2): # محاولتان لكل نموذج
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt
-                )
-                return response.text
-            except Exception as e:
-                last_exception = e
-                time.sleep(2) # الانتظار ثانيتين قبل إعادة المحاولة
-                
-    raise last_exception
+    response = client.models.generate_content(
+        model='gemini-3.8-flash',
+        contents=prompt
+    )
+    return response.text
 
 # ==========================================
 # 5. واجهة رفع ملف الجروب الواحد
@@ -217,18 +212,21 @@ if single_file:
     msgs, user_stats = parse_whatsapp_chat(single_file.getvalue())
     total_messages = len(msgs)
     
-    st.success(f"✅ تم قراءة الملف بنجاح! إجمالي الرسائل: {total_messages} رسالة.")
+    st.success(f"✅ تم قراءة الملف بنجاح! إجمالي الرسائل المقروءة: {total_messages} رسالة.")
     
-    if search_user:
-        matched_users = [u for u in user_stats.keys() if search_user.strip().lower() in u.lower()]
+    # عرض الإحصائيات عند البحث
+    if search_user and search_user.strip():
+        query = search_user.strip().lower()
+        matched_users = [u for u in user_stats.keys() if query in u.lower()]
+        
         if matched_users:
             st.markdown("### 📈 نتائج البحث عن الشخص:")
             for u in matched_users:
                 count = user_stats[u]
                 percentage = (count / total_messages * 100) if total_messages > 0 else 0
-                st.info(f"👤 **الاسم**: {u} | 📊 **عدد المرفوعات / الرسائل**: {count} رسالة | 🎯 **نسبة المشاركة**: {percentage:.1f}%")
+                st.info(f"👤 **الاسم المرصود**: {u} | 📊 **عدد الرسائل/المرفوعات**: {count} رسالة | 🎯 **نسبة التفاعل**: {percentage:.1f}%")
         else:
-            st.warning(f"⚠️ لم يتم العثور على أي مشاركات باسم '{search_user}' داخل هذه المحادثة.")
+            st.warning(f"⚠️ لم يتم العثور على اسم يحتوي على '{search_user}' داخل هذه المحادثة.")
 
     st.markdown("---")
 
