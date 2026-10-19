@@ -3,22 +3,22 @@ from google import genai
 import docx
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
 import io
+import re
 
 # ==========================================
 # 1. إعدادات الواجهة والصفحة
 # ==========================================
 st.set_page_config(
-    page_title="نظام تحليل محادثات الواتساب الأسبوعي",
+    page_title="نظام تحليل محادثات الواتساب - جهاز الأمن الوطني",
     page_icon="📊",
     layout="wide"
 )
 
 st.title("📊 نظام تحليل الرأي العام والتقارير الأسبوعية")
-st.subheader("قم برفع ملفات المحادثات للجروبات الثلاثة لتوليد التقرير المدمج")
+st.subheader("دائرة الأمن الوقائي - مديرية العمليات النفسية")
 
-# إدخال مفتاح API في الشريط الجانبي
+# إدخال مفتاح API وشريط البحث في الشريط الجانبي
 with st.sidebar:
     st.header("⚙️ إعدادات النظام")
     api_key = st.text_input(
@@ -26,31 +26,50 @@ with st.sidebar:
         type="password",
         help="احصل على مفتاح مجاني من https://aistudio.google.com/app/apikey"
     )
-    st.info("💡 المفتاح يتم استخدامه لتشغيل عمليات التحليل فقط.")
+    
+    st.markdown("---")
+    st.header("🔍 البحث عن إحصائيات عضو")
+    search_user = st.text_input(
+        "أدخل اسم الشخص للبحث عن مشاركاته:",
+        placeholder="مثال: أحمد علي"
+    )
+    st.info("💡 اكتب اسم الشخص كما يظهر في محادثة الواتساب لمعرفة عدد مرفوعاته.")
 
 # ==========================================
-# 2. دالة تنظيف وقراءة المحادثات
+# 2. دالة تنظيف وقراءة المحادثات واستخراج أسماء المترسلين
 # ==========================================
 def parse_whatsapp_chat(file_content):
     lines = file_content.decode('utf-8', errors='ignore').splitlines()
     messages = []
+    user_stats = {}
     
     for line in lines:
         line_str = line.strip()
         if not line_str or "<Media omitted>" in line_str or "Messages and calls are end-to-end encrypted" in line_str:
             continue
         
+        # محاولة التعرف على المرسل والنص
         if ":" in line_str:
             parts = line_str.split(":", 1)
-            if len(parts) > 1 and len(parts[1].strip()) > 0:
-                messages.append(parts[1].strip())
+            # التأكد من أن الجزء الأول يحتوي على اسم مرسل (تخطي طوابع الوقت إن وجدت)
+            sender_part = parts[0]
+            msg_text = parts[1].strip() if len(parts) > 1 else ""
+            
+            # استخراج الاسم بفرز الأرقام والتاريخ
+            sender_name = re.sub(r'^[\[\(\d\/\,\.\s\:\-\w\]\)]+-\s*', '', sender_part).strip()
+            if not sender_name:
+                sender_name = sender_part.strip()
+
+            if len(msg_text) > 0:
+                messages.append(f"{sender_name}: {msg_text}")
+                user_stats[sender_name] = user_stats.get(sender_name, 0) + 1
         else:
             if messages:
                 messages[-1] += " " + line_str
                 
-    return messages
+    return messages, user_stats
 
-def get_balanced_sample(msgs, max_count=600):
+def get_balanced_sample(msgs, max_count=1000):
     if len(msgs) <= max_count:
         return msgs
     step = len(msgs) // max_count
@@ -61,8 +80,6 @@ def get_balanced_sample(msgs, max_count=600):
 # ==========================================
 def create_docx_report(report_text):
     doc = docx.Document()
-    
-    # تحويل النص إلى أسطر لإنشاء الهيكلية
     lines = report_text.splitlines()
     
     for line in lines:
@@ -70,7 +87,6 @@ def create_docx_report(report_text):
         if not line_str:
             continue
             
-        # العناوين الرئيسية
         if line_str.startswith("# "):
             p = doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -92,41 +108,34 @@ def create_docx_report(report_text):
             run.font.size = Pt(14)
             run.font.bold = True
         else:
-            # الفقرات العادية
             p = doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             run = p.add_run(line_str.replace("**", ""))
             run.font.size = Pt(12)
             
-    # حفظ المستند في الذاكرة
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)
     return buffer
 
 # ==========================================
-# 4. دالة التحليل وبناء التقرير
+# 4. دالة التحليل وبناء التقرير عبر Gemini
 # ==========================================
-def generate_combined_report(chat1_msgs, chat2_msgs, chat3_msgs, user_api_key):
+def generate_single_chat_report(chat_msgs, user_api_key):
     client = genai.Client(api_key=user_api_key.strip())
     
-    s1 = get_balanced_sample(chat1_msgs, 600)
-    s2 = get_balanced_sample(chat2_msgs, 600)
-    s3 = get_balanced_sample(chat3_msgs, 600)
-    
-    combined_text = "=== محتوى الجروب الأول ===\n" + "\n".join([f"- {m}" for m in s1]) + "\n\n"
-    combined_text += "=== محتوى الجروب الثاني ===\n" + "\n".join([f"- {m}" for m in s2]) + "\n\n"
-    combined_text += "=== محتوى الجروب الثالث ===\n" + "\n".join([f"- {m}" for m in s3])
+    sample_msgs = get_balanced_sample(chat_msgs, 1000)
+    combined_text = "\n".join([f"- {m}" for m in sample_msgs])
 
     prompt = f"""
-أنت خبير إستراتيجي في تحليل العمليات النفسية والرأي العام.
-لديك المحتوى المستخرج من (3) جروبات رصد محادثات مختلفة:
+أنت خبير إستراتيجي في تحليل العمليات النفسية والرأي العام لجهاز أمني رسمي.
+لديك البيانات والمشاركات المستخرجة من محادثة الجروب المرفق:
 
 ---
 {combined_text}
 ---
 
-المطلوب منك تحليل كافة المحادثات والمنشورات بالكامل بدون استثناء، وتوليد التقرير النهائي باللغة العربية مع الالتزام بالواجهة والهيكلية أدناه بالضبط:
+المطلوب منك تحليل كافة المحادثات والمنشورات بالكامل، وتوليد التقرير النهائي باللغة العربية مع الالتزام بالواجهة والهيكلية أدناه بالضبط:
 
 ==================================================
 جهاز الأمن الوطني
@@ -149,13 +158,13 @@ def generate_combined_report(chat1_msgs, chat2_msgs, chat3_msgs, user_api_key):
 --------------------------------------------------
 
 ### 1. الإيجاز العام:
-ملخص تنفيذي شامل لكافة ما تم رصده في المحادثات لهذا الأسبوع.
+ملخص تنفيذي شامل لكافة ما تم رصده في المحادثة لهذا الأسبوع.
 
 ### 2. موقف العمليات النفسية وأبرز الشائعات والرأي العام والمرصد:
 تحليل دقيق لكافة تحركات التضليل الإعلامي والحملات الموجهة والشائعات المنتشرة.
 
 ### 3. تحليل شامل لكافة المواضيع المرصودة (شامل لجميع المواضيع الفرعية والرئيسية المذكورة في الرسائل):
-قم باستخراج وتحليل **جميع** المواضيع المطروحة في الجروبات الثلاثة دون حذف أو اختصار لمواضيع معينة، ولكل موضوع اكتب:
+قم باستخراج وتحليل **جميع** المواضيع المطروحة في المحادثة دون حذف أو اختصار لمواضيع معينة، ولكل موضوع اكتب:
 - **عنوان الموضوع**:
 - **شرح وتفاصيل الموضوع**:
 - **المنصة / المصدر**:
@@ -184,56 +193,55 @@ def generate_combined_report(chat1_msgs, chat2_msgs, chat3_msgs, user_api_key):
     return response.text
 
 # ==========================================
-# 5. أيقونات واجهة رفع الملفات الثلاثة
+# 5. واجهة رفع ملف الجروب الواحد
 # ==========================================
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.markdown("### 💬 الجروب الأول")
-    file1 = st.file_uploader("يرجى رفع ملف Chat 1 (.txt)", type=["txt"], key="file1")
-
-with col2:
-    st.markdown("### 💬 الجروب الثاني")
-    file2 = st.file_uploader("يرجى رفع ملف Chat 2 (.txt)", type=["txt"], key="file2")
-
-with col3:
-    st.markdown("### 💬 الجروب الثالث")
-    file3 = st.file_uploader("يرجى رفع ملف Chat 3 (.txt)", type=["txt"], key="file3")
+st.markdown("### 💬 رفع ملف محادثة الجروب (.txt)")
+single_file = st.file_uploader("يرجى رفع ملف المحادثة الخاص بالجروب", type=["txt"])
 
 st.markdown("---")
 
 # ==========================================
-# 6. زر المعالجة واستخراج النتائج
+# 6. زر المعالجة والإحصائيات وتوليد النتائج
 # ==========================================
-if st.button("🚀 توليد التقرير الأسبوعي المدمج", type="primary", use_container_width=True):
-    if not api_key:
-        st.error("⚠️ يرجى إدخال مفتاح API الخاص بك في الشريط الجانبي أولاً.")
-    elif not (file1 and file2 and file3):
-        st.warning("⚠️ يرجى رفع ملفات المحادثات للجروبات الثلاثة قبل بدء التحليل.")
-    else:
-        try:
-            with st.spinner("⏳ جاري قراءة الملفات وتحليل كافة المحادثات..."):
-                msgs1 = parse_whatsapp_chat(file1.getvalue())
-                msgs2 = parse_whatsapp_chat(file2.getvalue())
-                msgs3 = parse_whatsapp_chat(file3.getvalue())
-                
-                st.success(f"✅ تم القراءة بنجاح! (الجروب الأول: {len(msgs1)} رسالة | الجروب الثاني: {len(msgs2)} رسالة | الجروب الثالث: {len(msgs3)} رسالة)")
-                
-                report = generate_combined_report(msgs1, msgs2, msgs3, api_key)
-                
-                # إنشاء ملف Word
-                docx_file = create_docx_report(report)
-                
-                st.markdown("---")
-                st.header("📊 التقرير الأسبوعي المدمج والتحليل الشامل")
-                st.markdown(report)
-                
-                st.download_button(
-                    label="📄 تنزيل التقرير بملف ورد (Weekly_Report.docx)",
-                    data=docx_file,
-                    file_name="Weekly_Report.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True
-                )
-        except Exception as e:
-            st.error(f"❌ حدث خطأ أثناء تنفيذ الطلب: {e}")
+if single_file:
+    msgs, user_stats = parse_whatsapp_chat(single_file.getvalue())
+    total_messages = len(msgs)
+    
+    st.success(f"✅ تم قراءة الملف بنجاح! إجمالي الرسائل: {total_messages} رسالة.")
+    
+    # عرض إحصائية اسم الشخص المبحوث عنه
+    if search_user:
+        matched_users = [u for u in user_stats.keys() if search_user.strip().lower() in u.lower()]
+        if matched_users:
+            st.markdown("### 📈 نتائج البحث عن الشخص:")
+            for u in matched_users:
+                count = user_stats[u]
+                percentage = (count / total_messages * 100) if total_messages > 0 else 0
+                st.info(f"👤 **الاسم**: {u} | 📊 **عدد المرفوعات / الرسائل**: {count} رسالة | 🎯 **نسبة المشاركة**: {percentage:.1f}%")
+        else:
+            st.warning(f"⚠️ لم يتم العثور على أي مشاركات باسم '{search_user}' داخل هذه المحادثة.")
+
+    st.markdown("---")
+
+    if st.button("🚀 توليد التقرير الأسبوعي الشامل", type="primary", use_container_width=True):
+        if not api_key:
+            st.error("⚠️ يرجى إدخال مفتاح API الخاص بك في الشريط الجانبي أولاً.")
+        else:
+            try:
+                with st.spinner("⏳ جاري تحليل المحادثة وصياغة التقرير الإستراتيجي..."):
+                    report = generate_single_chat_report(msgs, api_key)
+                    docx_file = create_docx_report(report)
+                    
+                    st.markdown("---")
+                    st.header("📊 التقرير الأسبوعي المدمج والتحليل الشامل")
+                    st.markdown(report)
+                    
+                    st.download_button(
+                        label="📄 تنزيل التقرير بملف ورد (Weekly_Report.docx)",
+                        data=docx_file,
+                        file_name="Weekly_Report.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True
+                    )
+            except Exception as e:
+                st.error(f"❌ حدث خطأ أثناء تنفيذ الطلب: {e}")
