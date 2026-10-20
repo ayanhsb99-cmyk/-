@@ -36,15 +36,29 @@ with st.sidebar:
     st.info("💡 يمكنك كتابة جزء من الاسم لمعرفة عدد مرفوعاته داخل المحادثة.")
 
 # ==========================================
-# 2. دالة تنظيف وقراءة المحادثات (مُصححة وبسيطة)
+# 2. دالة تنظيف وقراءة المحادثات من ملف Word (DOCX)
 # ==========================================
-def parse_whatsapp_chat(file_content):
-    lines = file_content.decode('utf-8', errors='ignore').splitlines()
+def parse_whatsapp_chat_docx(uploaded_file):
+    # تحميل المستند من الذاكرة
+    doc = docx.Document(io.BytesIO(uploaded_file.getvalue()))
+    
+    # استخراج النصوص من جميع الفقرات والجداول داخل ملف الـ Word
+    lines = []
+    for p in doc.paragraphs:
+        if p.text.strip():
+            lines.append(p.text.strip())
+            
+    # قراءة النصوص إذا كانت داخل جداول في ملف الـ Word
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                if cell.text.strip():
+                    lines.append(cell.text.strip())
+
     messages = []
     user_stats = {}
     
-    for line in lines:
-        line_str = line.strip()
+    for line_str in lines:
         if not line_str or "<Media omitted>" in line_str or "رسائل ومكالمات مشفرة" in line_str or "end-to-end encrypted" in line_str:
             continue
         
@@ -198,10 +212,10 @@ def generate_single_chat_report(chat_msgs, user_api_key):
     return response.text
 
 # ==========================================
-# 5. واجهة رفع ملف الجروب الواحد
+# 5. واجهة رفع ملف الجروب (بصيغة ورد)
 # ==========================================
-st.markdown("### 💬 رفع ملف محادثة الجروب (.txt)")
-single_file = st.file_uploader("يرجى رفع ملف المحادثة الخاص بالجروب", type=["txt"])
+st.markdown("### 💬 رفع ملف محادثة الجروب بصيغة ورد (.docx)")
+single_file = st.file_uploader("يرجى رفع ملف المحادثة الخاص بالجروب", type=["docx", "doc"])
 
 st.markdown("---")
 
@@ -209,46 +223,49 @@ st.markdown("---")
 # 6. زر المعالجة والإحصائيات وتوليد النتائج
 # ==========================================
 if single_file:
-    msgs, user_stats = parse_whatsapp_chat(single_file.getvalue())
-    total_messages = len(msgs)
-    
-    st.success(f"✅ تم قراءة الملف بنجاح! إجمالي الرسائل المقروءة: {total_messages} رسالة.")
-    
-    # عرض الإحصائيات عند البحث
-    if search_user and search_user.strip():
-        query = search_user.strip().lower()
-        matched_users = [u for u in user_stats.keys() if query in u.lower()]
+    try:
+        msgs, user_stats = parse_whatsapp_chat_docx(single_file)
+        total_messages = len(msgs)
         
-        if matched_users:
-            st.markdown("### 📈 نتائج البحث عن الشخص:")
-            for u in matched_users:
-                count = user_stats[u]
-                percentage = (count / total_messages * 100) if total_messages > 0 else 0
-                st.info(f"👤 **الاسم المرصود**: {u} | 📊 **عدد الرسائل/المرفوعات**: {count} رسالة | 🎯 **نسبة التفاعل**: {percentage:.1f}%")
-        else:
-            st.warning(f"⚠️ لم يتم العثور على اسم يحتوي على '{search_user}' داخل هذه المحادثة.")
+        st.success(f"✅ تم قراءة ملف الورد بنجاح! إجمالي الرسائل المقروءة: {total_messages} رسالة.")
+        
+        # عرض الإحصائيات عند البحث
+        if search_user and search_user.strip():
+            query = search_user.strip().lower()
+            matched_users = [u for u in user_stats.keys() if query in u.lower()]
+            
+            if matched_users:
+                st.markdown("### 📈 نتائج البحث عن الشخص:")
+                for u in matched_users:
+                    count = user_stats[u]
+                    percentage = (count / total_messages * 100) if total_messages > 0 else 0
+                    st.info(f"👤 **الاسم المرصود**: {u} | 📊 **عدد الرسائل/المرفوعات**: {count} رسالة | 🎯 **نسبة التفاعل**: {percentage:.1f}%")
+            else:
+                st.warning(f"⚠️ لم يتم العثور على اسم يحتوي على '{search_user}' داخل هذه المحادثة.")
 
-    st.markdown("---")
+        st.markdown("---")
 
-    if st.button("🚀 توليد التقرير الأسبوعي الشامل", type="primary", use_container_width=True):
-        if not api_key:
-            st.error("⚠️ يرجى إدخال مفتاح API الخاص بك في الشريط الجانبي أولاً.")
-        else:
-            try:
-                with st.spinner("⏳ جاري تحليل المحادثة وصياغة التقرير الإستراتيجي..."):
-                    report = generate_single_chat_report(msgs, api_key)
-                    docx_file = create_docx_report(report)
-                    
-                    st.markdown("---")
-                    st.header("📊 التقرير الأسبوعي المدمج والتحليل الشامل")
-                    st.markdown(report)
-                    
-                    st.download_button(
-                        label="📄 تنزيل التقرير بملف ورد (Weekly_Report.docx)",
-                        data=docx_file,
-                        file_name="Weekly_Report.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True
-                    )
-            except Exception as e:
-                st.error(f"❌ حدث خطأ أثناء تنفيذ الطلب: {e}")
+        if st.button("🚀 توليد التقرير الأسبوعي الشامل", type="primary", use_container_width=True):
+            if not api_key:
+                st.error("⚠️ يرجى إدخال مفتاح API الخاص بك في الشريط الجانبي أولاً.")
+            else:
+                try:
+                    with st.spinner("⏳ جاري تحليل المحادثة وصياغة التقرير الإستراتيجي..."):
+                        report = generate_single_chat_report(msgs, api_key)
+                        docx_file = create_docx_report(report)
+                        
+                        st.markdown("---")
+                        st.header("📊 التقرير الأسبوعي المدمج والتحليل الشامل")
+                        st.markdown(report)
+                        
+                        st.download_button(
+                            label="📄 تنزيل التقرير بملف ورد (Weekly_Report.docx)",
+                            data=docx_file,
+                            file_name="Weekly_Report.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True
+                        )
+                except Exception as e:
+                    st.error(f"❌ حدث خطأ أثناء تنفيذ الطلب: {e}")
+    except Exception as e:
+        st.error(f"❌ حدث خطأ أثناء قراءة ملف الورد: {e}")
